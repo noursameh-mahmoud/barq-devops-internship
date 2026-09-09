@@ -113,3 +113,16 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Retest evidence: created a record (persistence test v2), then ran docker compose stop/rm/up for app-01, app-02, and postgres. After recreation, curl http://localhost:8080/records showed the record still present, proving true persistence through container recreation.
 - Related commit: <5d5f507>
 - Remaining uncertainty: none; fully proven by the record surviving full container destruction and recreation while keeping the named volume.
+
+
+## Entry 8 / 2026-09-10 / 2:30 AM
+- Symptom: no resource limits or restart policy were defined anywhere in docker-compose.yml; restart was explicitly set to "no".
+- Hypothesis: adding mem_limit/cpus and a restart policy directly to each service would satisfy the brief's requirement, using Docker Compose's deploy.resources.limits syntax.
+- Command or test: added deploy.resources.limits blocks to x-app, postgres, and redis; ran docker compose up -d --build then docker inspect app-01 --format='{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}'.
+- Actual output: docker inspect returned 0 0, showing no limits were actually applied.
+- Failed attempt and what changed your thinking: assumed deploy.resources.limits would work with plain docker compose, since it is valid Compose YAML syntax. Learned that this block is only enforced under Docker Swarm mode and is silently ignored by regular docker compose up, which explained the 0 0 result despite no error being raised initially.
+- Root cause: used Swarm-only deploy.resources.limits syntax instead of the classic mem_limit/cpus top-level service properties that plain Compose actually enforces. Also introduced a YAML indentation mistake when first adding mem_limit/cpus under the app service, accidentally nesting them inside the healthcheck block, which Compose correctly rejected with a validation error.
+- Fix: replaced deploy blocks with top-level mem_limit and cpus properties on x-app, postgres, and redis; corrected the indentation so they sit as siblings of healthcheck rather than nested inside it; also added restart: unless-stopped to all services including nginx.
+- Retest evidence: docker inspect app-01 now returns 268435456 500000000, confirming a real 256MB memory limit and 0.5 CPU limit are enforced. curl http://localhost:8080/ready still returns status ready, confirming the limits do not break normal operation.
+- Related commit: <8b0ecb0>
+- Remaining uncertainty: none for correctness; exact resource values (256MB/0.5 CPU for apps, 512MB/1.0 CPU for postgres) were chosen as reasonable defaults for a small assessment workload, not derived from load testing.
