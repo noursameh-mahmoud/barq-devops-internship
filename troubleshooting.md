@@ -15,3 +15,65 @@ Keep chronological entries. Copy this block for each meaningful investigation.
 - Remaining uncertainty:
 
 Do not fabricate a failed attempt just to fill the template. Record actual attempts.
+## Entry 1 / 2026-09-08
+- Symptom: curl to http://localhost:8080/ready returned 'Recv failure: Connection reset by peer'.
+- Hypothesis: NGINX is not actually listening on the port docker-compose.yml maps traffic to.
+- Command or test: cat nginx/nginx.conf ; docker compose logs nginx --tail=30
+- Actual output: nginx.conf had 'listen 80;' but docker-compose.yml maps host 8080 to container port 81. Also found upstream entry 'server app-01:8081' while the app actually listens on 8080 (confirmed from Dockerfile EXPOSE and APP_PORT).
+- Failed attempt and what changed your thinking: initially assumed the error was a database connectivity issue, since /ready touches postgres/redis. Checking nginx.conf directly showed the real cause was NGINX's own listen port, unrelated to the database.
+- Root cause: NGINX configured to listen on port 80 instead of 81, and app-01's upstream port was 8081 instead of 8080.
+- Fix: changed 'listen 80' to 'listen 81', and 'server app-01:8081' to 'server app-01:8080' in nginx/nginx.conf.
+- Retest evidence: after 'docker compose restart nginx', curl http://localhost:8080/ready returned '502 Bad Gateway' instead of connection reset, proving NGINX itself now reachable and correctly configured; the failure moved to the next layer (app connectivity).
+- Related commit: <0237451>
+- Remaining uncertainty: none for this specific issue; fully proven by the before/after curl behavior change.## Entry 1 / 2026-09-08
+- Symptom: curl to http://localhost:8080/ready returned 'Recv failure: Connection reset by peer'.
+- Hypothesis: NGINX is not actually listening on the port docker-compose.yml maps traffic to.
+- Command or test: cat nginx/nginx.conf ; docker compose logs nginx --tail=30
+- Actual output: nginx.conf had 'listen 80;' but docker-compose.yml maps host 8080 to container port 81. Also found upstream entry 'server app-01:8081' while the app actually listens on 8080 (confirmed from Dockerfile EXPOSE and APP_PORT).
+- Failed attempt and what changed your thinking: initially assumed the error was a database connectivity issue, since /ready touches postgres/redis. Checking nginx.conf directly showed the real cause was NGINX's own listen port, unrelated to the database.
+- Root cause: NGINX configured to listen on port 80 instead of 81, and app-01's upstream port was 8081 instead of 8080.
+- Fix: changed 'listen 80' to 'listen 81', and 'server app-01:8081' to 'server app-01:8080' in nginx/nginx.conf.
+- Retest evidence: after 'docker compose restart nginx', curl http://localhost:8080/ready returned '502 Bad Gateway' instead of connection reset, proving NGINX itself now reachable and correctly configured; the failure moved to the next layer (app connectivity).
+- Related commit: <0237451>
+- Remaining uncertainty: none for this specific issue; fully proven by the before/after curl behavior change.
+
+
+## Entry 2 / 2026-09-08
+- Symptom: After fixing NGINX's port, curl to /ready returned '502 Bad Gateway'.
+- Hypothesis: NGINX can now reach the app containers over the network, but the Flask app itself is refusing the connection.
+- Command or test: docker compose logs nginx --tail=20
+- Actual output: nginx error log showed 'connect() failed (111: Connection refused) while connecting to upstream ... upstream: http://172.18.0.2:8080/ready' - correct address and port, but actively refused.
+- Failed attempt and what changed your thinking: expected a 'Connection refused' error to mean the app crashed; checking docker-compose.yml showed the app was actually configured with APP_HOST=127.0.0.1, meaning it intentionally only accepts connections from inside its own container.
+- Root cause: APP_HOST was set to 127.0.0.1 instead of 0.0.0.0, so the app rejected connections coming from NGINX (a different container).
+- Fix: changed APP_HOST to 0.0.0.0 in docker-compose.yml's shared app environment block. Also fixed app-02's INSTANCE_ID, which was incorrectly duplicated as 'app-01' instead of 'app-02'.
+- Retest evidence: after 'docker compose up -d --build', curl http://localhost:8080/ready returned a real JSON response instead of 502, showing dependencies as unavailable rather than a network-level failure - proving the app was now reachable.
+- Related commit: <0cdb0a9>
+- Remaining uncertainty: none for connectivity; the 'unavailable' dependencies pointed to a separate, deeper issue investigated next.
+
+
+## Entry 3 / 2026-09-08
+- Symptom: curl to /ready returned dependencies postgres unavailable and redis unavailable even though NGINX and the app were reachable.
+- Hypothesis: the app's DATABASE_URL/REDIS_URL point to the wrong ports or credentials compared to what postgres/redis actually expose internally.
+- Command or test: cat config/app.env ; compared against docker-compose.yml's postgres/redis service definitions.
+- Actual output: app.env used postgres:5433 and redis:6380, but the postgres and redis containers expose their standard default ports internally (5432 and 6379) - confirmed via docker compose ps showing PORTS as 5432/tcp and 6379/tcp. Also found the DATABASE_URL password ended in dots8d while docker-compose.yml's POSTGRES_PASSWORD ended in dots8c, a one-character mismatch.
+- Failed attempt and what changed your thinking: none failed here; the port numbers in app.env didn't match anything else in the project, which was the direct giveaway.
+- Root cause: config/app.env had incorrect, non-standard port numbers for both postgres and redis, plus a typo'd password differing by one character from the actual database password.
+- Fix: corrected DATABASE_URL to use port 5432 and the matching password; corrected REDIS_URL to use port 6379.
+- Retest evidence: after rebuilding with docker compose up -d --build, curl http://localhost:8080/ready returned dependencies postgres ready and redis ready with overall status ready - full chain confirmed working end-to-end.
+- Related commit: <1c1950e>
+- Remaining uncertainty: none; directly proven by the /ready status changing from not_ready to ready.
+
+
+## Entry 4 / 2026-09-08 (in progress)
+- Symptom: repeated GET requests to /instance through NGINX always return instance_id app-02, never app-01, across multiple test batches (6 and 12 requests).
+- Hypothesis: either app-01 is unhealthy/unreachable specifically, or NGINX's load balancing is not behaving as expected (e.g. connection reuse, or an upstream state issue).
+- Command or test: tested app-01 directly from inside its own container using a python urllib script, bypassing NGINX and the network entirely.
+- Actual output: app-01 returned a correct, healthy response with instance_id app-01 when tested directly - ruling out app-01 itself being broken.
+- Failed attempt and what changed your thinking: assumed app-01 might be crashing; direct-container test disproved this. Also noted both app-01 and app-02 still show Docker unhealthy status due to a separate, already-identified bug (healthcheck tests /healthz, but the real endpoint is /health) - confirmed this is unrelated to NGINX routing, since NGINX doesn't use Docker's healthcheck status for routing decisions.
+- Root cause: not yet identified.
+- Fix: not yet applied.
+- Retest evidence: n/a, still investigating.
+- Related commit: n/a
+- Remaining uncertainty: need to inspect NGINX's access log upstream field across many requests to see the actual routing pattern, and consider whether curl/connection reuse is a factor.
+
+
