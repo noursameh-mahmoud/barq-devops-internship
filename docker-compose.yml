@@ -2,7 +2,7 @@ name: barq-assessment
 x-app: &app
   build: .
   init: true
-  restart: "no"
+  restart: unless-stopped
   env_file: ./config/app.env
   environment: &app-env
     APP_HOST: "0.0.0.0"
@@ -14,9 +14,14 @@ x-app: &app
     timeout: 3s
     retries: 3
     start_period: 3s
+  mem_limit: 256m
+  cpus: 0.5
   networks: [frontend, backend]
 services:
   postgres:
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
     image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     container_name: postgres
     environment:
@@ -35,6 +40,9 @@ services:
       retries: 10
     networks: [backend]
   redis:
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
     image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     container_name: redis
     command: ["redis-server", "--save", "", "--appendonly", "no"]
@@ -58,6 +66,7 @@ services:
       <<: *app-env
       INSTANCE_ID: "app-02"
   nginx:
+    restart: unless-stopped
     image: nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
     container_name: nginx
     ports: ["127.0.0.1:${PUBLIC_PORT:-8080}:81"]
