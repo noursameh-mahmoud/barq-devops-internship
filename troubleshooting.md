@@ -64,7 +64,7 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Remaining uncertainty: none; directly proven by the /ready status changing from not_ready to ready.
 
 
-## Entry 4 / 2026-09-08 (in progress)
+## Entry 4 / 2026-09-08
 - Symptom: repeated GET requests to /instance through NGINX always return instance_id app-02, never app-01, across multiple test batches (6 and 12 requests).
 - Hypothesis: either app-01 is unhealthy/unreachable specifically, or NGINX's load balancing is not behaving as expected (e.g. connection reuse, or an upstream state issue).
 - Command or test: tested app-01 directly from inside its own container using a python urllib script, bypassing NGINX and the network entirely.
@@ -74,3 +74,18 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Fix: none required; re-ran the same test as a slower, uninterrupted 10-request loop with 0.5s spacing after all other fixes were in place.
 - Retest evidence: 10 requests to /instance returned a genuine mix of app-01 (7 times) and app-02 (3 times) - confirmed NGINX round-robins between both instances correctly.
 - Remaining uncertainty: the exact cause of the earlier skewed results is unconfirmed; noted as a resolved non-issue rather than a proven bug, since it did not reproduce under clean conditions.
+
+
+## Entry 5 / 2026-09-09
+- Symptom: docker compose ps showed app-01 and app-02 as (unhealthy) even though the apps worked correctly when tested directly.
+- Hypothesis: the Docker healthcheck is testing the wrong URL path.
+- Command or test: compared docker-compose.yml healthcheck test command against the Flask app's actual defined routes.
+- Actual output: healthcheck tested http://127.0.0.1:8080/healthz, but the app only defines /health (no z).
+- Failed attempt and what changed your thinking: after fixing the URL and running docker compose up -d --build, containers still showed (unhealthy) with no change. Checked docker compose ps and found the CREATED timestamp was still from the original build 47 hours earlier, proving Compose had not actually recreated the containers despite the --build flag. Manually running the exact healthcheck command inside the container confirmed /health worked correctly, isolating the problem to stale containers rather than a bad fix.
+- Root cause: healthcheck URL was /healthz instead of /health; additionally, docker compose up --build did not force container recreation on its own.
+- Fix: corrected the URL to /health, then re-ran with docker compose up -d --build --force-recreate app-01 app-02 to guarantee the containers were rebuilt with the new setting.
+- Retest evidence: docker compose ps now shows both app-01 and app-02 as (healthy), with a fresh CREATED timestamp confirming real recreation.
+- Related commit: <02fe9c8>
+- Remaining uncertainty: none; fully proven by the before/after health status and container recreation timestamp.
+
+
