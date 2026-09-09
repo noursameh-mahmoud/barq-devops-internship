@@ -89,3 +89,16 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Remaining uncertainty: none; fully proven by the before/after health status and container recreation timestamp.
 
 
+## Entry 6 / 2026-09-09
+- Symptom: Dockerfile created a low-privilege user (app, uid 10001) but the final USER instruction switched back to root before the app started.
+- Hypothesis: this was likely an unintentional leftover, since creating a dedicated user only to discard it serves no purpose and directly contradicts the brief's requirement to avoid root/privileged operation where practical.
+- Command or test: reviewed the Dockerfile line by line; ran docker compose exec app-01 whoami before the fix to confirm the container was genuinely running as root.
+- Actual output: whoami returned root before the fix.
+- Failed attempt and what changed your thinking: none; the fix was straightforward once identified.
+- Root cause: Dockerfile had USER root instead of USER app as its final user-switching instruction.
+- Fix: changed USER root to USER app in the Dockerfile, then rebuilt with docker compose up -d --build --force-recreate app-01 app-02.
+- Retest evidence: docker compose exec app-01 whoami now returns app, and id shows uid=10001(app) gid=10001(app) instead of root. Confirmed curl http://localhost:8080/ready still returns status ready, proving the app functions correctly as a non-root user.
+- Related commit: <bf11e60>
+- Remaining uncertainty: none; fully proven by whoami/id output and continued app functionality.
+
+
