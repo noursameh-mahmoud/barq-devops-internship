@@ -15,7 +15,7 @@ Keep chronological entries. Copy this block for each meaningful investigation.
 - Remaining uncertainty:
 
 Do not fabricate a failed attempt just to fill the template. Record actual attempts.
-## Entry 1 / 2026-09-08
+## Entry 1 / 2026-09-08 / 6:47 PM
 - Symptom: curl to http://localhost:8080/ready returned 'Recv failure: Connection reset by peer'.
 - Hypothesis: NGINX is not actually listening on the port docker-compose.yml maps traffic to.
 - Command or test: cat nginx/nginx.conf ; docker compose logs nginx --tail=30
@@ -38,7 +38,7 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Remaining uncertainty: none for this specific issue; fully proven by the before/after curl behavior change.
 
 
-## Entry 2 / 2026-09-08
+## Entry 2 / 2026-09-08 / 7:30 PM
 - Symptom: After fixing NGINX's port, curl to /ready returned '502 Bad Gateway'.
 - Hypothesis: NGINX can now reach the app containers over the network, but the Flask app itself is refusing the connection.
 - Command or test: docker compose logs nginx --tail=20
@@ -51,7 +51,7 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Remaining uncertainty: none for connectivity; the 'unavailable' dependencies pointed to a separate, deeper issue investigated next.
 
 
-## Entry 3 / 2026-09-08
+## Entry 3 / 2026-09-08 / 8:17 PM
 - Symptom: curl to /ready returned dependencies postgres unavailable and redis unavailable even though NGINX and the app were reachable.
 - Hypothesis: the app's DATABASE_URL/REDIS_URL point to the wrong ports or credentials compared to what postgres/redis actually expose internally.
 - Command or test: cat config/app.env ; compared against docker-compose.yml's postgres/redis service definitions.
@@ -64,7 +64,7 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Remaining uncertainty: none; directly proven by the /ready status changing from not_ready to ready.
 
 
-## Entry 4 / 2026-09-08
+## Entry 4 / 2026-09-09 / 11:54 PM 
 - Symptom: repeated GET requests to /instance through NGINX always return instance_id app-02, never app-01, across multiple test batches (6 and 12 requests).
 - Hypothesis: either app-01 is unhealthy/unreachable specifically, or NGINX's load balancing is not behaving as expected (e.g. connection reuse, or an upstream state issue).
 - Command or test: tested app-01 directly from inside its own container using a python urllib script, bypassing NGINX and the network entirely.
@@ -76,7 +76,7 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Remaining uncertainty: the exact cause of the earlier skewed results is unconfirmed; noted as a resolved non-issue rather than a proven bug, since it did not reproduce under clean conditions.
 
 
-## Entry 5 / 2026-09-09
+## Entry 5 / 2026-09-10 / 1:01 AM
 - Symptom: docker compose ps showed app-01 and app-02 as (unhealthy) even though the apps worked correctly when tested directly.
 - Hypothesis: the Docker healthcheck is testing the wrong URL path.
 - Command or test: compared docker-compose.yml healthcheck test command against the Flask app's actual defined routes.
@@ -89,7 +89,7 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Remaining uncertainty: none; fully proven by the before/after health status and container recreation timestamp.
 
 
-## Entry 6 / 2026-09-09
+## Entry 6 / 2026-09-10 / 1:35 AM
 - Symptom: Dockerfile created a low-privilege user (app, uid 10001) but the final USER instruction switched back to root before the app started.
 - Hypothesis: this was likely an unintentional leftover, since creating a dedicated user only to discard it serves no purpose and directly contradicts the brief's requirement to avoid root/privileged operation where practical.
 - Command or test: reviewed the Dockerfile line by line; ran docker compose exec app-01 whoami before the fix to confirm the container was genuinely running as root.
@@ -102,3 +102,14 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Remaining uncertainty: none; fully proven by whoami/id output and continued app functionality.
 
 
+## Entry 7 / 2026-09-10 / 2:02 AM
+- Symptom: a record created through /records disappeared after recreating the app and postgres containers, even after removing an unrelated tmpfs setting.
+- Hypothesis: the named volume postgres-data was not actually mounted at PostgreSQL's real data directory.
+- Command or test: cat docker-compose.yml showed the volume mounted at /var/lib/postgresql/backup, not /var/lib/postgresql/data (PostgreSQL's actual data directory).
+- Actual output: after removing only the tmpfs line and recreating containers, the test record was still lost; docker compose logs postgres showed a fresh initdb running rather than loading existing data, confirming the volume was not being used for real data storage.
+- Failed attempt and what changed your thinking: initially assumed removing the tmpfs setting alone would fix persistence, since tmpfs was the more obviously wrong setting. Testing proved this insufficient; comparing the volume's actual mount path against PostgreSQL's real data directory revealed the deeper issue, that the named volume was pointed at the wrong folder entirely.
+- Root cause: the named volume was mounted at /var/lib/postgresql/backup, an unused path, instead of /var/lib/postgresql/data, PostgreSQL's real data directory.
+- Fix: changed the volume mount to postgres-data:/var/lib/postgresql/data.
+- Retest evidence: created a record (persistence test v2), then ran docker compose stop/rm/up for app-01, app-02, and postgres. After recreation, curl http://localhost:8080/records showed the record still present, proving true persistence through container recreation.
+- Related commit: <5d5f507>
+- Remaining uncertainty: none; fully proven by the record surviving full container destruction and recreation while keeping the named volume.
