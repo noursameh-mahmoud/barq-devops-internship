@@ -126,3 +126,16 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Retest evidence: docker inspect app-01 now returns 268435456 500000000, confirming a real 256MB memory limit and 0.5 CPU limit are enforced. curl http://localhost:8080/ready still returns status ready, confirming the limits do not break normal operation.
 - Related commit: <8b0ecb0>
 - Remaining uncertainty: none for correctness; exact resource values (256MB/0.5 CPU for apps, 512MB/1.0 CPU for postgres) were chosen as reasonable defaults for a small assessment workload, not derived from load testing.
+
+
+## Entry 9 / 2026-09-10 / 2:42 AM
+- Symptom: the brief requires blocking direct NGINX access to PostgreSQL/Redis, but NGINX was connected to both frontend and backend networks.
+- Hypothesis: removing NGINX from the backend network, leaving it only on frontend, would prevent it from reaching postgres/redis while still allowing it to reach app-01 and app-02, since apps are connected to both networks.
+- Command or test: grep -n networks docker-compose.yml showed nginx on networks: [frontend, backend].
+- Actual output: confirmed nginx had unnecessary access to the backend network.
+- Failed attempt and what changed your thinking: none; the fix was straightforward once the misconfiguration was identified.
+- Root cause: nginx's service definition included backend in its networks list with no functional reason, since it only ever proxies to the apps.
+- Fix: changed nginx's networks setting to [frontend] only.
+- Retest evidence: curl http://localhost:8080/ready still returns status ready, confirming NGINX-to-app connectivity is unaffected. docker compose exec nginx nc -zv postgres 5432 and the same for redis 6379 both failed with a DNS resolution error (bad address), confirming NGINX can no longer resolve or reach postgres/redis at all.
+- Related commit: <49addde>
+- Remaining uncertainty: none; proven by both continued app functionality and confirmed inability to resolve backend service names from nginx.
