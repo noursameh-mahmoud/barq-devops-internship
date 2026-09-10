@@ -139,3 +139,16 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Retest evidence: curl http://localhost:8080/ready still returns status ready, confirming NGINX-to-app connectivity is unaffected. docker compose exec nginx nc -zv postgres 5432 and the same for redis 6379 both failed with a DNS resolution error (bad address), confirming NGINX can no longer resolve or reach postgres/redis at all.
 - Related commit: <49addde>
 - Remaining uncertainty: none; proven by both continued app functionality and confirmed inability to resolve backend service names from nginx.
+
+
+## Entry 10 / 2026-09-10 / 3:17 AM
+- Symptom: config/app.env, containing real database credentials, was being tracked in git and baked directly into the Docker image via the Dockerfile.
+- Hypothesis: the .gitignore file should have been preventing this, so checking its actual patterns was the first step.
+- Command or test: cat .gitignore
+- Actual output: .gitignore contained .env and .env.* patterns, which match a file literally named .env, but not config/app.env (whose basename is app.env, not .env), so the real secrets file was never actually ignored.
+- Failed attempt and what changed your thinking: assumed the existing .gitignore already covered this file safely, since a .env.example was already present in the starter pack; direct inspection revealed the pattern mismatch.
+- Root cause: .gitignore patterns did not match the actual path/filename used (config/app.env); additionally, the Dockerfile explicitly copied this file into the image with COPY config/app.env /srv/app.env, baking secrets into the image layer permanently regardless of git tracking.
+- Fix: added config/app.env explicitly to .gitignore; ran git rm --cached config/app.env to untrack it going forward (file remains on disk locally); created config/app.env.example with placeholder, non-real values; removed the COPY config/app.env line from the Dockerfile entirely, relying solely on docker-compose.yml's env_file: directive to supply real values at container runtime instead of baking them into the image.
+- Retest evidence: rebuilt with docker compose up -d --build; curl http://localhost:8080/ready still returned status ready, confirming the app correctly receives its configuration at runtime without needing the file baked into the image.
+- Related commit: <6e00896>
+- Remaining uncertainty: the real config/app.env file was committed in earlier commits in this repo's history before this fix; those historical commits still contain the real (synthetic lab) credentials. Rewriting git history to remove them was considered out of scope given the brief's requirement not to fabricate commit history, so this is documented here and in security_review.md as a known limitation rather than hidden.
