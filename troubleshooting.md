@@ -163,5 +163,5 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Root cause: not fully determined; behavior is consistent with a known class of transient latency issues in WSL2's networking layer rather than an application or Compose configuration problem, since retries always succeeded and no corresponding errors appeared in postgres/redis logs.
 - Fix: no configuration change made, since this appears to be an environmental characteristic rather than a bug in the solution. Instead, made validate.py itself tolerant of transient timeouts by adding a small bounded retry (http_get_with_retry) around the /records and /counter checks, consistent with the bounded-wait pattern already used for /ready.
 - Retest evidence: after adding the retry helper, python3 validate.py passed all 10 checks (PASS) in a full run.
-- Related commit: <fill in after next commit>
+- Related commit: <b270349>
 - Remaining uncertainty: exact root cause of the intermittent timeout is unconfirmed; would need testing on a non-WSL2 Linux host to isolate whether this is WSL2-specific.
