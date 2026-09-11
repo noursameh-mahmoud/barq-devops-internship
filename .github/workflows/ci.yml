@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml syntax
+        run: docker compose config
+
+      - name: Build images
+        run: docker compose build
+
+      - name: Start environment
+        run: |
+          cp config/app.env.example config/app.env
+          docker compose up -d
+          docker compose ps
+
+      - name: Wait for readiness
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/ready; then
+              echo "Ready"
+              exit 0
+            fi
+            echo "Waiting for readiness... ($i)"
+            sleep 2
+          done
+          echo "Environment did not become ready in time"
+          docker compose logs
+          exit 1
+
+      - name: Run validation
+        run: python3 validate.py
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
